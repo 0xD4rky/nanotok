@@ -1,0 +1,32 @@
+[build-system]
+requires = ["scikit-build-core>=0.11", "pybind11>=2.13"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "nanotok"
+version = "0.1.0"
+description = "High-performance BPE tokenizer. 20-60x faster than tiktoken."
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = []
+
+[project.optional-dependencies]
+hub = ["huggingface-hub>=0.20"]
+chat = ["jinja2>=3.0"]
+all = ["huggingface-hub>=0.20", "jinja2>=3.0"]
+
+[tool.scikit-build]
+wheel.packages = ["src/nanotok"]
+
+[tool.scikit-build.cmake.define]
+CMAKE_BUILD_TYPE = "Release"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+    "tiktoken>=0.5",
+    "transformers>=4.40",
+    "jinja2>=3.0",
+    "huggingface-hub>=0.20",
+]
