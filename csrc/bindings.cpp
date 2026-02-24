@@ -23,6 +23,8 @@ PYBIND11_MODULE(_nanotok_cpp, m) {
     m.attr("PT_GPT2")     = static_cast<int>(BPEEngine::PT_GPT2);
     m.attr("PT_METASPACE") = static_cast<int>(BPEEngine::PT_METASPACE);
     m.attr("PT_SPLIT_SPC") = static_cast<int>(BPEEngine::PT_SPLIT_SPC);
+    m.attr("PT_REGEX")    = static_cast<int>(BPEEngine::PT_REGEX);
+    m.attr("PT_SPLIT_MERGE_PREV") = static_cast<int>(BPEEngine::PT_SPLIT_MERGE_PREV);
 
     py::class_<BPEEngine>(m, "BPEEngine")
         .def(py::init<const std::string&>(), py::arg("tokenizer_json_path"))
@@ -31,6 +33,11 @@ PYBIND11_MODULE(_nanotok_cpp, m) {
         .def("set_pretokenizer_mode", &BPEEngine::set_pretokenizer_mode,
              py::arg("mode"))
         .def("get_pretokenizer_mode", &BPEEngine::get_pretokenizer_mode)
+        .def("get_metaspace_add_prefix", &BPEEngine::get_metaspace_add_prefix)
+        .def("set_cache_enabled", &BPEEngine::set_cache_enabled,
+             py::arg("enabled"))
+        .def("cache_enabled", &BPEEngine::cache_enabled)
+        .def("clear_cache", &BPEEngine::clear_cache)
         .def("encode", &BPEEngine::encode,
              py::arg("text"),
              py::arg("allowed_special") = std::unordered_set<std::string>())
@@ -41,6 +48,10 @@ PYBIND11_MODULE(_nanotok_cpp, m) {
              py::arg("chunks"))
         .def("decode", &BPEEngine::decode,
              py::arg("ids"))
+        .def("decode_bytes", [](const BPEEngine& self, const std::vector<int>& ids) -> py::bytes {
+            std::string s = self.decode(ids);
+            return py::bytes(s.data(), s.size());
+        }, py::arg("ids"))
         .def("batch_decode", &BPEEngine::batch_decode,
              py::arg("batch_ids"))
         .def("token_to_id", &BPEEngine::token_to_id,

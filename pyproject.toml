@@ -6,9 +6,30 @@ build-backend = "scikit_build_core.build"
 name = "nanotok"
 version = "0.1.0"
 description = "High-performance BPE tokenizer. 20-60x faster than tiktoken."
-requires-python = ">=3.10"
+readme = "README.md"
 license = "MIT"
+requires-python = ">=3.10"
+authors = [{name = "Ishaan Kumar", email = "ishaan.kumar281@gmail.com"}]
+keywords = ["tokenizer", "bpe", "nlp", "llm", "tiktoken", "huggingface"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: C++",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Linguistic",
+]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/0xD4rky/nanotok"
+Repository = "https://github.com/0xD4rky/nanotok"
+Issues = "https://github.com/0xD4rky/nanotok/issues"
 
 [project.optional-dependencies]
 hub = ["huggingface-hub>=0.20"]

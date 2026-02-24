@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from nanotok._nanotok_cpp import BPEEngine
+from nanotok._nanotok_cpp import BPEEngine, PT_METASPACE, PT_SPLIT_SPC
 
 
 class Tokenizer:
@@ -26,6 +26,10 @@ class Tokenizer:
         self._pad_token = self._resolve_token("pad_token")
         self._unk_token = self._resolve_token("unk_token")
         self._chat_template = self._config.get("chat_template")
+
+        pt_mode = self._engine.get_pretokenizer_mode()
+        self._strip_decode_prefix = (pt_mode == PT_METASPACE and
+                                     self._engine.get_metaspace_add_prefix())
 
     def _resolve_token(self, field: str) -> str | None:
         val = self._config.get(field)
@@ -81,7 +85,10 @@ class Tokenizer:
     def decode(self, ids: list[int], *, skip_special_tokens: bool = False) -> str:
         if skip_special_tokens:
             ids = [i for i in ids if i not in self._special_ids]
-        return self._engine.decode(ids)
+        text = self._engine.decode(ids)
+        if self._strip_decode_prefix and text.startswith(" "):
+            text = text[1:]
+        return text
 
     def encode_batch(
         self,
@@ -94,6 +101,12 @@ class Tokenizer:
             allowed_special = set(self._special_tokens) if add_special_tokens else set()
         return self._engine.batch_encode(texts, allowed_special)
 
+    def clear_cache(self) -> None:
+        self._engine.clear_cache()
+
+    def set_cache_enabled(self, enabled: bool) -> None:
+        self._engine.set_cache_enabled(enabled)
+
     def decode_batch(
         self,
         batch_ids: list[list[int]],
@@ -102,7 +115,10 @@ class Tokenizer:
     ) -> list[str]:
         if skip_special_tokens:
             batch_ids = [[i for i in ids if i not in self._special_ids] for ids in batch_ids]
-        return self._engine.batch_decode(batch_ids)
+        results = self._engine.batch_decode(batch_ids)
+        if self._strip_decode_prefix:
+            results = [t[1:] if t.startswith(" ") else t for t in results]
+        return results
 
     def token_to_id(self, token: str) -> int | None:
         result = self._engine.token_to_id(token)
