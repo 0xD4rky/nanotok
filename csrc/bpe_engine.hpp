@@ -251,6 +251,9 @@ private:
 
   int byte_initial_id_[256];
 
+  static constexpr size_t SP_CHAR_TABLE_SIZE = 65536;
+  std::vector<int> sp_char_id_;
+
   enum CClass : uint8_t { CC_OTHER=0, CC_LETTER=1, CC_DIGIT=2, CC_SPACE=3, CC_NL=4, CC_APOS=5, CC_HIGH=6 };
   uint8_t cclass_[256];
 
@@ -1570,12 +1573,17 @@ private:
 
     int nids = 0;
     size_t i = 0;
+    const int* __restrict__ sp_lut = sp_char_id_.empty() ? nullptr : sp_char_id_.data();
     while (i < len) {
       uint32_t cp;
       size_t adv = utf8_decode(data, len, i, cp);
-      auto it = token_to_id_.find(std::string(data + i, adv));
-      if (it != token_to_id_.end()) {
-        init_ids[nids++] = it->second;
+      int id = (sp_lut && cp < SP_CHAR_TABLE_SIZE) ? sp_lut[cp] : -1;
+      if (__builtin_expect(id < 0, 0)) {
+        auto it = token_to_id_.find(std::string(data + i, adv));
+        id = (it != token_to_id_.end()) ? it->second : -1;
+      }
+      if (__builtin_expect(id >= 0, 1)) {
+        init_ids[nids++] = id;
       } else {
         for (size_t b = 0; b < adv; b++) {
           int bid = byte_initial_id_[static_cast<uint8_t>(data[i + b])];
@@ -2569,6 +2577,17 @@ private:
         std::string utf8 = codepoint_to_utf8(byte2unicode[b]);
         auto it = token_to_id_.find(utf8);
         byte_initial_id_[b] = (it != token_to_id_.end()) ? it->second : -1;
+      }
+    }
+
+    if (byte_fallback_) {
+      sp_char_id_.assign(SP_CHAR_TABLE_SIZE, -1);
+      for (const auto& [tok, id] : token_to_id_) {
+        if (tok.empty()) continue;
+        uint32_t cp;
+        size_t adv = utf8_decode(tok.data(), tok.size(), 0, cp);
+        if (adv == tok.size() && cp < SP_CHAR_TABLE_SIZE)
+          sp_char_id_[cp] = id;
       }
     }
 
