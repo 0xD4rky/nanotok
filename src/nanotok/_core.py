@@ -8,9 +8,15 @@ from nanotok._nanotok_cpp import BPEEngine, PT_METASPACE, PT_SPLIT_SPC
 
 
 class Tokenizer:
-    """High-performance BPE tokenizer backed by a C++ engine."""
 
-    def __init__(self, engine: BPEEngine, *, config: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        engine: BPEEngine,
+        *,
+        config: dict[str, Any] | None = None,
+        prefix_token_ids: list[int] | None = None,
+        suffix_token_ids: list[int] | None = None,
+    ):
         self._engine = engine
         self._config = config or {}
 
@@ -26,6 +32,10 @@ class Tokenizer:
         self._pad_token = self._resolve_token("pad_token")
         self._unk_token = self._resolve_token("unk_token")
         self._chat_template = self._config.get("chat_template")
+        self._padding_side = self._config.get("padding_side", "right")
+
+        self._prefix_token_ids = prefix_token_ids or []
+        self._suffix_token_ids = suffix_token_ids or []
 
         pt_mode = self._engine.get_pretokenizer_mode()
         self._strip_decode_prefix = (pt_mode == PT_METASPACE and
@@ -39,12 +49,49 @@ class Tokenizer:
             return val.get("content")
         return str(val)
 
+    @staticmethod
+    def _parse_post_processor(tokenizer_json_path: Path) -> tuple[list[int], list[int]]:
+        with open(tokenizer_json_path) as f:
+            data = json.load(f)
+
+        pp = data.get("post_processor")
+        if not pp:
+            return [], []
+
+        if pp.get("type") == "Sequence":
+            template = None
+            for proc in pp.get("processors", []):
+                if proc.get("type") == "TemplateProcessing":
+                    template = proc
+                    break
+            if not template:
+                return [], []
+            pp = template
+
+        if pp.get("type") != "TemplateProcessing":
+            return [], []
+
+        token_to_id = {t["content"]: t["id"] for t in data.get("added_tokens", [])}
+
+        prefix, suffix = [], []
+        seen_sequence = False
+        for item in pp.get("single", []):
+            if "Sequence" in item:
+                seen_sequence = True
+            elif "SpecialToken" in item:
+                tid = token_to_id.get(item["SpecialToken"]["id"])
+                if tid is not None:
+                    (suffix if seen_sequence else prefix).append(tid)
+
+        return prefix, suffix
+
     @classmethod
     def from_file(cls, path: str | Path) -> Tokenizer:
         path = Path(path)
         engine = BPEEngine(str(path))
         config = cls._load_config(path.parent)
-        return cls(engine, config=config)
+        prefix, suffix = cls._parse_post_processor(path)
+        return cls(engine, config=config, prefix_token_ids=prefix, suffix_token_ids=suffix)
 
     @classmethod
     def from_pretrained(cls, repo_id: str, **kwargs: Any) -> Tokenizer:
@@ -52,7 +99,8 @@ class Tokenizer:
 
         tokenizer_path, config = download_tokenizer(repo_id, **kwargs)
         engine = BPEEngine(str(tokenizer_path))
-        return cls(engine, config=config)
+        prefix, suffix = cls._parse_post_processor(tokenizer_path)
+        return cls(engine, config=config, prefix_token_ids=prefix, suffix_token_ids=suffix)
 
     @classmethod
     def from_tiktoken(cls, encoding_name: str) -> Tokenizer:
@@ -80,7 +128,10 @@ class Tokenizer:
     ) -> list[int]:
         if allowed_special is None:
             allowed_special = set(self._special_tokens) if add_special_tokens else set()
-        return self._engine.encode(text, allowed_special)
+        ids = self._engine.encode(text, allowed_special)
+        if add_special_tokens:
+            ids = self._prefix_token_ids + ids + self._suffix_token_ids
+        return ids
 
     def decode(self, ids: list[int], *, skip_special_tokens: bool = False) -> str:
         if skip_special_tokens:
@@ -99,7 +150,10 @@ class Tokenizer:
     ) -> list[list[int]]:
         if allowed_special is None:
             allowed_special = set(self._special_tokens) if add_special_tokens else set()
-        return self._engine.batch_encode(texts, allowed_special)
+        batch = self._engine.batch_encode(texts, allowed_special)
+        if add_special_tokens and (self._prefix_token_ids or self._suffix_token_ids):
+            batch = [self._prefix_token_ids + ids + self._suffix_token_ids for ids in batch]
+        return batch
 
     def clear_cache(self) -> None:
         self._engine.clear_cache()
@@ -156,6 +210,10 @@ class Tokenizer:
     def pad_token(self) -> str | None:
         return self._pad_token
 
+    @pad_token.setter
+    def pad_token(self, value: str | None) -> None:
+        self._pad_token = value
+
     @property
     def pad_token_id(self) -> int | None:
         return None if self._pad_token is None else self.token_to_id(self._pad_token)
@@ -167,6 +225,16 @@ class Tokenizer:
     @property
     def unk_token_id(self) -> int | None:
         return None if self._unk_token is None else self.token_to_id(self._unk_token)
+
+    @property
+    def padding_side(self) -> str:
+        return self._padding_side
+
+    @padding_side.setter
+    def padding_side(self, value: str) -> None:
+        if value not in ("left", "right"):
+            raise ValueError("padding_side must be 'left' or 'right'")
+        self._padding_side = value
 
     def __call__(
         self,
@@ -196,27 +264,33 @@ class Tokenizer:
         else:
             target = 0
 
-        pad_id = self.pad_token_id if self.pad_token_id is not None else 0
-
         if target > 0:
-            all_ids = [ids + [pad_id] * (target - len(ids)) for ids in all_ids]
-            all_masks = [mask + [0] * (target - len(mask)) for mask in all_masks]
+            pad_id = self.pad_token_id
+            if pad_id is None:
+                raise ValueError(
+                    "Padding requested but the tokenizer has no pad token. "
+                    "Set one with: tokenizer.pad_token = tokenizer.eos_token"
+                )
+            if self._padding_side == "left":
+                all_ids = [[pad_id] * (target - len(ids)) + ids for ids in all_ids]
+                all_masks = [[0] * (target - len(mask)) + mask for mask in all_masks]
+            else:
+                all_ids = [ids + [pad_id] * (target - len(ids)) for ids in all_ids]
+                all_masks = [mask + [0] * (target - len(mask)) for mask in all_masks]
 
         if return_tensors == "pt":
             import torch
-            ids_t = torch.tensor(all_ids, dtype=torch.long)
-            mask_t = torch.tensor(all_masks, dtype=torch.long)
-            if is_single:
-                ids_t, mask_t = ids_t.squeeze(0), mask_t.squeeze(0)
-            return {"input_ids": ids_t, "attention_mask": mask_t}
+            return {
+                "input_ids": torch.tensor(all_ids, dtype=torch.long),
+                "attention_mask": torch.tensor(all_masks, dtype=torch.long),
+            }
 
         if return_tensors == "np":
             import numpy as np
-            ids_a = np.array(all_ids, dtype=np.int64)
-            mask_a = np.array(all_masks, dtype=np.int64)
-            if is_single:
-                ids_a, mask_a = ids_a.squeeze(0), mask_a.squeeze(0)
-            return {"input_ids": ids_a, "attention_mask": mask_a}
+            return {
+                "input_ids": np.array(all_ids, dtype=np.int64),
+                "attention_mask": np.array(all_masks, dtype=np.int64),
+            }
 
         return {
             "input_ids": all_ids[0] if is_single else all_ids,

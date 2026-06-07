@@ -48,6 +48,8 @@ dev-dependencies = [
     "ruff>=0.4",
     "tiktoken>=0.5",
     "transformers>=4.40",
+    "tokenizers>=0.15",
+    "datasets>=2.16",
     "jinja2>=3.0",
     "huggingface-hub>=0.20",
 ]
